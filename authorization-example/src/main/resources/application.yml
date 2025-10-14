@@ -1,0 +1,62 @@
+server:
+  port: 8080
+  servlet:
+    # Spring Session相关配置
+    session:
+      cookie:
+        # 如果访问前端的ip(域名)和前端axios请求的ip(域名)一致，则这里不用配置，使用域名的情况下最好配置一下顶级域名，例如xxx.com
+        domain: 172.16.63.132
+
+spring:
+  application:
+    name: authorization-example
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/fancy_auth?serverTimezone=UTC&userUnicode=true&characterEncoding=utf-8
+    username: root
+    password: root
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: root
+      database: 0
+  security:
+    oauth2:
+      client:
+        registration:
+          # 这个'gitee'就是registrationId
+          gitee:
+            # 指定oauth登录提供者，该oauth登录由provider中的gitee来处理
+            provider: gitee
+            # 客户端名字
+            client-name: Sign in with Gitee
+            # 认证方式
+            authorization-grant-type: authorization_code
+            # 客户端id，使用自己的gitee的客户端id
+            client-id: 09d6307153cf7c3fb7bb95e7019480c3920d06bd02a4beda4430103c2e6d89f0
+            # 客户端秘钥，使用自己的gitee的客户端秘钥
+            client-secret: 711ca65c7707f20abec4c00f0aae91ffa84ab2cc0e316728ac4297056923a460
+            # 回调地址
+            redirect-uri: http://172.16.63.132:8080/login/oauth2/code/gitee
+            # 申请scope列表
+            scope:
+              - emails
+              - projects
+          github:
+            # security client默认实现了GitHub提供的oauth2登录
+            provider: github
+            client-id: Iv23liMyXSrHyugL5ZXo
+            client-secret: ebff4124ce1af18768d049a7edb939343feb07a6
+        # oauth登录提供商
+        provider:
+          # gitee的OAuth2端点配置
+          gitee:
+            # 设置用户信息响应体中账号的字段
+            user-name-attribute: id
+            # 获取token的地址
+            token-uri: https://gitee.com/oauth/token
+            # 获取用户信息的地址
+            user-info-uri: https://gitee.com/api/v5/user
+            # 发起授权申请的地址
+            authorization-uri: https://gitee.com/oauth/authorize
