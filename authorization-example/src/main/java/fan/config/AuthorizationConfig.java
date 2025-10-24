@@ -253,6 +253,7 @@ public class AuthorizationConfig {
         return http.build();
     }
 
+
     /**
      * 配置密码解析器，使用BCrypt的方式对密码进行加密和验证
      *
