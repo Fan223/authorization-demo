@@ -15,6 +15,9 @@ import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
 
+import static fan.constant.SecurityConstants.OAUTH_LOGIN_TYPE;
+import static fan.constant.SecurityConstants.TOKEN_UNIQUE_ID;
+
 /**
  * 自定义三方oidc登录用户信息服务
  *
@@ -41,7 +44,8 @@ public class CustomOidcUserService extends OidcUserService {
         // 将loginType设置至attributes中
         LinkedHashMap<String, Object> attributes = new LinkedHashMap<>(oidcIdToken.getClaims());
         // 将RegistrationId当做登录类型
-        attributes.put("loginType", userRequest.getClientRegistration().getRegistrationId());
+        attributes.put(OAUTH_LOGIN_TYPE, userRequest.getClientRegistration().getRegistrationId());
+        attributes.put(TOKEN_UNIQUE_ID, oauth2ThirdAccount.getUniqueId());
         // 重新生成一个idToken
         OidcIdToken idToken = new OidcIdToken(oidcIdToken.getTokenValue(), oidcIdToken.getIssuedAt(), oidcIdToken.getExpiresAt(), attributes);
         String userNameAttributeName = userRequest.getClientRegistration().getProviderDetails().getUserInfoEndpoint()

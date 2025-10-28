@@ -10,14 +10,20 @@ import fan.authorization.DeviceClientAuthenticationProvider;
 import fan.authorization.federation.FederatedIdentityIdTokenCustomizer;
 import fan.authorization.sms.SmsCaptchaGrantAuthenticationConverter;
 import fan.authorization.sms.SmsCaptchaGrantAuthenticationProvider;
+import fan.authorization.wechat.WechatAuthorizationRequestConsumer;
+import fan.authorization.wechat.WechatCodeGrantRequestEntityConverter;
+import fan.authorization.wechat.WechatMapAccessTokenResponseConverter;
+import fan.constant.RedisConstants;
 import fan.constant.SecurityConstants;
 import fan.handler.*;
 import fan.support.RedisOperator;
 import fan.util.SecurityUtils;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.annotation.Secured;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -29,8 +35,16 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.endpoint.DefaultAuthorizationCodeTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
+import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestResolver;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
 import org.springframework.security.oauth2.core.oidc.OidcScopes;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.authorization.JdbcOAuth2AuthorizationConsentService;
@@ -53,6 +67,8 @@ import org.springframework.security.web.DefaultSecurityFilterChain;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.UrlUtils;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
+import org.springframework.util.ObjectUtils;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -61,6 +77,9 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 import static fan.constant.SecurityConstants.LOGIN_PAGE_URI;
@@ -205,7 +224,7 @@ public class AuthorizationConfig {
      * @throws Exception 抛出
      */
     @Bean
-    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http, ClientRegistrationRepository clientRegistrationRepository) throws Exception {
         // 开启CORS配置，配合下边的CorsConfigurationSource配置实现跨域配置
         http.cors(Customizer.withDefaults());
         // 禁用csrf
@@ -248,8 +267,13 @@ public class AuthorizationConfig {
         http.oauth2Login(oauth2Login ->
                 oauth2Login
                         .loginPage(LOGIN_PAGE_URI)
+                        .authorizationEndpoint(authorization -> authorization
+                                .authorizationRequestResolver(this.authorizationRequestResolver(clientRegistrationRepository))
+                        )
+                        .tokenEndpoint(token -> token
+                                .accessTokenResponseClient(this.accessTokenResponseClient())
+                        )
         );
-
         return http.build();
     }
 
@@ -373,31 +397,6 @@ public class AuthorizationConfig {
         // 基于db的授权确认管理服务，还有一个基于内存的服务实现InMemoryOAuth2AuthorizationConsentService
         return new JdbcOAuth2AuthorizationConsentService(jdbcTemplate, registeredClientRepository);
     }
-//    @Bean
-//    @SneakyThrows
-//    public JWKSource<SecurityContext> jwkSource() {
-//        // 先从redis获取
-//        String jwkSetCache = redisOperator.get(RedisConstants.AUTHORIZATION_JWS_PREFIX_KEY);
-//        if (ObjectUtils.isEmpty(jwkSetCache)) {
-//            KeyPair keyPair = generateRsaKey();
-//            RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
-//            RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
-//            RSAKey rsaKey = new RSAKey.Builder(publicKey)
-//                    .privateKey(privateKey)
-//                    .keyID(UUID.randomUUID().toString())
-//                    .build();
-//            // 生成jws
-//            JWKSet jwkSet = new JWKSet(rsaKey);
-//            // 转为json字符串
-//            String jwkSetString = jwkSet.toString(Boolean.FALSE);
-//            // 存入redis
-//            redisOperator.set(RedisConstants.AUTHORIZATION_JWS_PREFIX_KEY, jwkSetString);
-//            return new ImmutableJWKSet<>(jwkSet);
-//        }
-//        // 解析存储的jws
-//        JWKSet jwkSet = JWKSet.parse(jwkSetCache);
-//        return new ImmutableJWKSet<>(jwkSet);
-//    }
 
     /**
      * 配置jwk源，使用非对称加密，公开用于检索匹配指定选择器的JWK的方法
@@ -405,15 +404,28 @@ public class AuthorizationConfig {
      * @return JWKSource
      */
     @Bean
+    @SneakyThrows
     public JWKSource<SecurityContext> jwkSource() {
-        KeyPair keyPair = generateRsaKey();
-        RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
-        RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
-        RSAKey rsaKey = new RSAKey.Builder(publicKey)
-                .privateKey(privateKey)
-                .keyID(UUID.randomUUID().toString())
-                .build();
-        JWKSet jwkSet = new JWKSet(rsaKey);
+        // 先从redis获取
+        String jwkSetCache = redisOperator.get(RedisConstants.AUTHORIZATION_JWS_PREFIX_KEY);
+        if (ObjectUtils.isEmpty(jwkSetCache)) {
+            KeyPair keyPair = generateRsaKey();
+            RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
+            RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
+            RSAKey rsaKey = new RSAKey.Builder(publicKey)
+                    .privateKey(privateKey)
+                    .keyID(UUID.randomUUID().toString())
+                    .build();
+            // 生成jws
+            JWKSet jwkSet = new JWKSet(rsaKey);
+            // 转为json字符串
+            String jwkSetString = jwkSet.toString(Boolean.FALSE);
+            // 存入redis
+            redisOperator.set(RedisConstants.AUTHORIZATION_JWS_PREFIX_KEY, jwkSetString);
+            return new ImmutableJWKSet<>(jwkSet);
+        }
+        // 解析存储的jws
+        JWKSet jwkSet = JWKSet.parse(jwkSetCache);
         return new ImmutableJWKSet<>(jwkSet);
     }
 
@@ -489,6 +501,49 @@ public class AuthorizationConfig {
         config.setAllowCredentials(true);
         source.registerCorsConfiguration("/**", config);
         return source;
+    }
+
+    /**
+     * AuthorizationRequest 自定义配置
+     *
+     * @param clientRegistrationRepository yml配置中客户端信息存储类
+     * @return OAuth2AuthorizationRequestResolver
+     */
+    private OAuth2AuthorizationRequestResolver authorizationRequestResolver(ClientRegistrationRepository clientRegistrationRepository) {
+        DefaultOAuth2AuthorizationRequestResolver authorizationRequestResolver =
+                new DefaultOAuth2AuthorizationRequestResolver(
+                        clientRegistrationRepository, "/oauth2/authorization");
+
+        // 兼容微信登录授权申请
+        authorizationRequestResolver.setAuthorizationRequestCustomizer(new WechatAuthorizationRequestConsumer());
+
+        return authorizationRequestResolver;
+    }
+
+    /**
+     * 适配微信登录适配，添加自定义请求token入参处理
+     *
+     * @return OAuth2AccessTokenResponseClient accessToken响应信息处理
+     */
+    private OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> accessTokenResponseClient() {
+        DefaultAuthorizationCodeTokenResponseClient tokenResponseClient = new DefaultAuthorizationCodeTokenResponseClient();
+        tokenResponseClient.setRequestEntityConverter(new WechatCodeGrantRequestEntityConverter());
+        // 自定义 RestTemplate，适配微信登录获取token
+        OAuth2AccessTokenResponseHttpMessageConverter messageConverter = new OAuth2AccessTokenResponseHttpMessageConverter();
+        List<MediaType> mediaTypes = new ArrayList<>(messageConverter.getSupportedMediaTypes());
+        // 微信获取token时响应的类型为“text/plain”，这里特殊处理一下
+        mediaTypes.add(MediaType.TEXT_PLAIN);
+        messageConverter.setAccessTokenResponseConverter(new WechatMapAccessTokenResponseConverter());
+        messageConverter.setSupportedMediaTypes(mediaTypes);
+
+        // 初始化RestTemplate
+        RestTemplate restTemplate = new RestTemplate(Arrays.asList(
+                new FormHttpMessageConverter(),
+                messageConverter));
+
+        restTemplate.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+        tokenResponseClient.setRestOperations(restTemplate);
+        return tokenResponseClient;
     }
 
     /**

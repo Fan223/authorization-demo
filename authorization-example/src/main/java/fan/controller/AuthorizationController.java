@@ -48,7 +48,7 @@ public class AuthorizationController {
     private final RegisteredClientRepository registeredClientRepository;
     private final OAuth2AuthorizationConsentService authorizationConsentService;
     private final RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
-    private IOauth2BasicUserService basicUserService;
+    private final IOauth2BasicUserService basicUserService;
 
     private static Set<ScopeWithDescription> withDescription(Set<String> scopes) {
         Set<ScopeWithDescription> scopeWithDescriptions = new HashSet<>();

@@ -1,9 +1,9 @@
 package fan.authorization.federation;
 
 import fan.constant.SecurityConstants;
+import fan.entity.Oauth2BasicUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.oidc.IdTokenClaimNames;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.endpoint.OidcParameterNames;
@@ -15,6 +15,9 @@ import org.springframework.security.oauth2.server.authorization.token.OAuth2Toke
 
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static fan.constant.SecurityConstants.OAUTH_LOGIN_TYPE;
+import static fan.constant.SecurityConstants.TOKEN_UNIQUE_ID;
 
 /**
  * An {@link OAuth2TokenCustomizer} to map claims from a federated identity to
@@ -58,15 +61,20 @@ public final class FederatedIdentityIdTokenCustomizer implements OAuth2TokenCust
         // 检查登录用户信息是不是OAuth2User，在token中添加loginType属性
         if (context.getPrincipal().getPrincipal() instanceof OAuth2User user) {
             JwtClaimsSet.Builder claims = context.getClaims();
-            Object loginType = user.getAttribute("loginType");
+            Object loginType = user.getAttribute(OAUTH_LOGIN_TYPE);
             if (loginType instanceof String) {
                 // 同时检验是否为String和是否不为空
-                claims.claim("loginType", loginType);
+                claims.claim(OAUTH_LOGIN_TYPE, loginType);
+            }
+            Object uniqueId = user.getAttribute(TOKEN_UNIQUE_ID);
+            if (uniqueId instanceof String) {
+                // 同时检验是否为String和是否不为空
+                claims.claim(TOKEN_UNIQUE_ID, uniqueId);
             }
         }
 
         // 检查登录用户信息是不是UserDetails，排除掉没有用户参与的流程
-        if (context.getPrincipal().getPrincipal() instanceof UserDetails user) {
+        if (context.getPrincipal().getPrincipal() instanceof Oauth2BasicUser user) {
             // 获取申请的scopes
             Set<String> scopes = context.getAuthorizedScopes();
             // 获取用户的权限
@@ -84,6 +92,7 @@ public final class FederatedIdentityIdTokenCustomizer implements OAuth2TokenCust
             JwtClaimsSet.Builder claims = context.getClaims();
             // 将权限信息放入jwt的claims中（也可以生成一个以指定字符分割的字符串放入）
             claims.claim(SecurityConstants.AUTHORITIES_KEY, authoritySet);
+            claims.claim(TOKEN_UNIQUE_ID, user.getId());
             // 放入其它自定内容
             // 角色、头像...
         }
@@ -99,7 +108,6 @@ public final class FederatedIdentityIdTokenCustomizer implements OAuth2TokenCust
         } else {
             claims = Collections.emptyMap();
         }
-
         return new HashMap<>(claims);
     }
 }
