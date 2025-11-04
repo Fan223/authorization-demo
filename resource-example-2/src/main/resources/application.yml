@@ -1,0 +1,11 @@
+spring:
+  cloud:
+    nacos:
+      serverAddr: 127.0.0.1:8848
+      username: nacos
+      password:
+  config:
+    import:
+      - nacos:resource.yml?refresh=true
+  application:
+    name: resource
